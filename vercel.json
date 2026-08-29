@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/complete",
+      "destination": "/api/complete"
+    },
+    {
+      "source": "/complete/(.*)",
+      "destination": "/api/complete"
+    },
+    {
+      "source": "/api/auth/token",
+      "destination": "/api/auth/token"
+    },
+    {
+      "source": "/api/complete",
+      "destination": "/api/complete"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    }
+  ]
+}

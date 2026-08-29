@@ -1,0 +1,6 @@
+{
+  "name": "Formulário Astral",
+  "description": "Formulário de candidatura para Staff de Discord com autenticação e painel privado de avaliação da administração.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
