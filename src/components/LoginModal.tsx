@@ -20,8 +20,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   // Listen for postMessage from the Discord OAuth Popup Window
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+      // Validate origin against current window or known domains
+      const currentOrigin = window.location.origin;
+      const isAllowedOrigin =
+        !event.origin ||
+        event.origin === currentOrigin ||
+        event.origin.includes('localhost') ||
+        event.origin.endsWith('.run.app') ||
+        event.origin.includes('shuziroastral.lol');
+
+      if (!isAllowedOrigin) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data?.session) {
