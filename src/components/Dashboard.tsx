@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StaffApplication, ApplicationStatus } from '../types';
 import { STAFF_QUESTIONS } from '../data/questions';
 import { formatDate, generateDiscordMarkdown } from '../utils/helpers';
-import { submitFormToComplete } from '../services/api';
+import { submitFormToComplete, getDiscordWebhookSettings, saveDiscordWebhookSettings } from '../services/api';
 import {
   ShieldCheck,
   Search,
@@ -23,6 +23,9 @@ import {
   RefreshCw,
   Hash,
   SendHorizontal,
+  Bell,
+  Settings,
+  Check,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -57,6 +60,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [requestLogMsg, setRequestLogMsg] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+  const [webhookUrlInput, setWebhookUrlInput] = useState('');
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [webhookSuccessMsg, setWebhookSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    getDiscordWebhookSettings().then((settings) => {
+      if (settings && settings.discordWebhookUrl) {
+        setWebhookUrlInput(settings.discordWebhookUrl);
+      }
+    });
+  }, []);
+
+  const handleSaveWebhook = async () => {
+    setIsSavingWebhook(true);
+    const success = await saveDiscordWebhookSettings(webhookUrlInput.trim());
+    setIsSavingWebhook(false);
+    if (success) {
+      setWebhookSuccessMsg('Webhook do Discord configurado com sucesso!');
+      setTimeout(() => {
+        setWebhookSuccessMsg(null);
+        setIsWebhookModalOpen(false);
+      }, 1500);
+    } else {
+      setWebhookSuccessMsg('Erro ao salvar Webhook.');
+    }
+  };
 
   const handleManualRefresh = async () => {
     if (onRefresh) {
@@ -206,30 +236,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </p>
           </div>
 
-          {/* Admin Role Tabs */}
-          <div className="flex items-center space-x-1.5 bg-zinc-900/80 p-1.5 rounded-xl border border-zinc-800">
-            {[
-              { id: 'bakai_shuziro978', label: 'Supervisão Staff' },
-              { id: 'Helena', label: 'Moderação Sênior' },
-              { id: 'cyan', label: 'Administração Geral' },
-            ].map((adm) => (
-              <button
-                key={adm.id}
-                onClick={() => setActiveAdminTab(adm.id as any)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center space-x-1 ${
-                  activeAdminTab === adm.id
-                    ? 'bg-red-600 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-                }`}
-              >
-                <UserCheck className="h-3 w-3" />
-                <span>{adm.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+            {/* Admin Role Tabs & Webhook Setting */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center space-x-1.5 bg-zinc-900/80 p-1.5 rounded-xl border border-zinc-800">
+                {[
+                  { id: 'bakai_shuziro978', label: 'Supervisão Staff' },
+                  { id: 'Helena', label: 'Moderação Sênior' },
+                  { id: 'cyan', label: 'Administração Geral' },
+                ].map((adm) => (
+                  <button
+                    key={adm.id}
+                    onClick={() => setActiveAdminTab(adm.id as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center space-x-1 ${
+                      activeAdminTab === adm.id
+                        ? 'bg-red-600 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                    }`}
+                  >
+                    <UserCheck className="h-3 w-3" />
+                    <span>{adm.label}</span>
+                  </button>
+                ))}
+              </div>
 
-        {requestLogMsg && (
+              <button
+                onClick={() => setIsWebhookModalOpen(true)}
+                className="flex items-center space-x-1.5 rounded-xl bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 border border-zinc-800 hover:bg-zinc-800 hover:text-white transition"
+                title="Configurar Webhook do Discord para receber notificações"
+              >
+                <Bell className="h-3.5 w-3.5 text-indigo-400" />
+                <span>Discord Webhook</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between border-t border-zinc-900 pt-3">
+            <div className="inline-flex items-center space-x-2 text-[11px] font-mono text-emerald-400">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Sincronização em Tempo Real Ativa (Multi-dispositivos & Global)</span>
+            </div>
+          </div>
+
+          {requestLogMsg && (
           <div className="mt-4 rounded-xl border border-emerald-800/80 bg-emerald-950/40 p-3 text-xs text-emerald-300 font-mono flex items-center justify-between">
             <span>{requestLogMsg}</span>
             <button onClick={() => setRequestLogMsg(null)} className="text-emerald-400 hover:text-white">
@@ -568,6 +619,71 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DISCORD WEBHOOK SETTINGS MODAL */}
+      {isWebhookModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-center space-x-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-950 text-indigo-400 border border-indigo-800">
+                  <Bell className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Notificações por Webhook do Discord</h3>
+                  <p className="text-[11px] text-zinc-400">Receba alertas em tempo real no canal dos Administradores</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsWebhookModalOpen(false)}
+                className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">URL do Webhook do Discord</label>
+                <input
+                  type="url"
+                  value={webhookUrlInput}
+                  onChange={(e) => setWebhookUrlInput(e.target.value)}
+                  placeholder="https://discord.com/api/webhooks/..."
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none font-mono"
+                />
+                <p className="mt-1.5 text-[11px] text-zinc-500">
+                  Quando qualquer pessoa preencher o formulário (no celular ou PC), o servidor enviará uma mensagem no Discord com todas as 10 respostas e marcação para a Staff.
+                </p>
+              </div>
+
+              {webhookSuccessMsg && (
+                <div className="rounded-xl border border-emerald-800/80 bg-emerald-950/40 p-3 text-xs text-emerald-300 font-mono flex items-center space-x-2">
+                  <Check className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                  <span>{webhookSuccessMsg}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-zinc-900">
+                <button
+                  onClick={() => setIsWebhookModalOpen(false)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-400 hover:bg-zinc-800 hover:text-white transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveWebhook}
+                  disabled={isSavingWebhook}
+                  className="flex items-center space-x-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition disabled:opacity-50"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{isSavingWebhook ? 'Salvando...' : 'Salvar Webhook'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

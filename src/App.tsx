@@ -60,6 +60,13 @@ export default function App() {
 
   useEffect(() => {
     loadServerApplications();
+
+    // Live real-time polling every 5 seconds across all devices
+    const interval = setInterval(() => {
+      loadServerApplications();
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {

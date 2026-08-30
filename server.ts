@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
@@ -22,6 +23,77 @@ app.use((req, res, next) => {
 // Admin Username List
 const ADMIN_LIST = ['bakai_shuziro978', 'helena', 'cyan'];
 
+// Persistent storage paths
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'applications.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+
+// Ensure data directory exists
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Could not create data directory (e.g. read-only filesystem):', e);
+}
+
+// Helper to load applications from disk
+function loadApplicationsFromDisk(): any[] {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Erro ao ler applications.json:', e);
+  }
+  return [];
+}
+
+// Helper to save applications to disk
+function saveApplicationsToDisk(apps: any[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(DATA_FILE, JSON.stringify(apps, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Erro ao salvar applications.json:', e);
+  }
+}
+
+// Helper to get settings (e.g. webhook URL)
+function loadSettingsFromDisk(): { discordWebhookUrl?: string } {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    // Ignore
+  }
+  return {
+    discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || '',
+  };
+}
+
+function saveSettingsToDisk(settings: { discordWebhookUrl?: string }) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Erro ao salvar settings.json:', e);
+  }
+}
+
+// Applications Store (Loaded from persistent storage)
+let applications: any[] = loadApplicationsFromDisk();
+
 // Helper to check if nick is admin
 function isNickAdmin(nick: string): { isAdmin: boolean; adminRole: string | null } {
   const clean = (nick || '').trim().toLowerCase();
@@ -35,8 +107,45 @@ function isNickAdmin(nick: string): { isAdmin: boolean; adminRole: string | null
   return { isAdmin: false, adminRole: null };
 }
 
-// In-Memory Applications Store (100% Real Submissions)
-let applications: any[] = [];
+// Helper to dispatch Discord Webhook to Staff channel
+async function sendDiscordWebhookNotification(appData: any) {
+  const settings = loadSettingsFromDisk();
+  const webhookUrl = settings.discordWebhookUrl || process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || !webhookUrl.startsWith('https://discord.com/api/webhooks/')) {
+    return;
+  }
+
+  try {
+    const fields = (appData.detailedAnswers || []).slice(0, 10).map((item: any) => ({
+      name: `Q${item.questionId}: ${item.questionTitle.substring(0, 100)}`,
+      value: (item.answerText || 'Sem resposta').substring(0, 1024),
+      inline: false,
+    }));
+
+    const embed = {
+      title: `✦ NOVO FORMULÁRIO STAFF RECEBIDO! ✦`,
+      description: `**Candidato:** **@${appData.discordUsername}**\n**Idade:** ${appData.age} anos\n**ID do Envio:** \`${appData.submissionId || appData.id}\`\n**Admins:** @bakai_shuziro978, @Helena, @cyan\n**Status:** 🟡 **Pendente**`,
+      color: 0xdc2626, // Red Astral color
+      fields: fields.length > 0 ? fields : undefined,
+      footer: {
+        text: `Formulário Astral • Recebido em ${new Date().toLocaleString('pt-BR')}`,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: `🚨 **Novo formulário enviado para a Staff por @${appData.discordUsername}!** (<@&bakai_shuziro978> <@&Helena> <@&cyan>)`,
+        embeds: [embed],
+      }),
+    });
+    console.log(`[Webhook] Notificação enviada para o Discord com sucesso!`);
+  } catch (err) {
+    console.warn(`[Webhook] Erro ao despachar notificação para o Discord:`, err);
+  }
+}
 
 // Active Auth Tokens Map
 const activeTokens = new Map<string, { discordUsername: string; isAdmin: boolean; adminRole?: string | null; createdAt: string }>();
@@ -476,7 +585,7 @@ app.get('/api/auth/discord/callback', async (req, res) => {
 });
 
 // SUBMIT FORM API ROUTE: /complete and /api/complete
-const handleCompleteSubmit = (req: express.Request, res: express.Response) => {
+const handleCompleteSubmit = async (req: express.Request, res: express.Response) => {
   const authHeader = req.headers.authorization;
   let token = req.body.authToken || req.body.token;
 
@@ -499,6 +608,9 @@ const handleCompleteSubmit = (req: express.Request, res: express.Response) => {
   if (!discordUsername || typeof discordUsername !== 'string' || !discordUsername.trim()) {
     return res.status(400).json({ error: 'Campo discordUsername é obrigatório.' });
   }
+
+  // Reload applications to ensure fresh multi-device state
+  applications = loadApplicationsFromDisk();
 
   // Generate unique submission ID (ID de Envio) if not supplied
   const finalSubmissionId =
@@ -533,12 +645,16 @@ const handleCompleteSubmit = (req: express.Request, res: express.Response) => {
     authToken: token,
   };
 
-  // Unshift so new applications appear at top
-  applications.unshift(newApp);
+  // Remove duplicate if submissionId already exists, then insert at top
+  applications = [newApp, ...applications.filter((a) => a.submissionId !== finalSubmissionId && a.id !== newApp.id)];
+  saveApplicationsToDisk(applications);
 
   console.log(
     `[Formulário Astral] Formulário (Envio ID: ${finalSubmissionId}) recebido de @${cleanNick}! Direcionado para: ${assignedAdmins.join(', ')}`
   );
+
+  // Send asynchronous Discord Webhook notification if webhook is configured
+  sendDiscordWebhookNotification(newApp).catch((e) => console.warn('Erro no webhook:', e));
 
   return res.status(201).json({
     success: true,
@@ -558,6 +674,8 @@ app.post('/applications', handleCompleteSubmit);
 
 // FETCH APPLICATIONS API ROUTE: GET /complete & GET /api/complete
 const handleGetApplications = (_req: express.Request, res: express.Response) => {
+  // Always load latest persisted state from storage
+  applications = loadApplicationsFromDisk();
   return res.json({
     success: true,
     count: applications.length,
@@ -570,12 +688,34 @@ app.get('/api/complete', handleGetApplications);
 app.get('/api/applications', handleGetApplications);
 app.get('/applications', handleGetApplications);
 
+// SETTINGS API ROUTE (Discord Webhook for Staff notification)
+app.get('/api/settings', (_req, res) => {
+  const settings = loadSettingsFromDisk();
+  return res.json({
+    success: true,
+    settings: {
+      hasDiscordWebhook: !!settings.discordWebhookUrl,
+      discordWebhookUrl: settings.discordWebhookUrl || '',
+    },
+  });
+});
+
+app.post('/api/settings', (req, res) => {
+  const { discordWebhookUrl } = req.body;
+  saveSettingsToDisk({ discordWebhookUrl: discordWebhookUrl || '' });
+  return res.json({
+    success: true,
+    message: 'Configurações de Webhook salvas com sucesso!',
+  });
+});
+
 // UPDATE APPLICATION STATUS/NOTES ROUTE
 const handleUpdateApplication = (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   const { status, adminNotes, reviewedBy } = req.body;
 
-  const appIndex = applications.findIndex((a) => a.id === id);
+  applications = loadApplicationsFromDisk();
+  const appIndex = applications.findIndex((a) => a.id === id || a.submissionId === id);
   if (appIndex === -1) {
     return res.status(404).json({ error: 'Formulário não encontrado.' });
   }
@@ -587,6 +727,8 @@ const handleUpdateApplication = (req: express.Request, res: express.Response) =>
     reviewedBy: reviewedBy || 'Administração Staff',
     reviewedAt: new Date().toISOString(),
   };
+
+  saveApplicationsToDisk(applications);
 
   return res.json({
     success: true,
@@ -606,12 +748,15 @@ app.post('/complete/update', (req, res) => {
 // DELETE APPLICATION ROUTE
 const handleDeleteApplication = (req: express.Request, res: express.Response) => {
   const { id } = req.params;
+  applications = loadApplicationsFromDisk();
   const initialLength = applications.length;
-  applications = applications.filter((a) => a.id !== id);
+  applications = applications.filter((a) => a.id !== id && a.submissionId !== id);
 
   if (applications.length === initialLength) {
     return res.status(404).json({ error: 'Formulário não encontrado.' });
   }
+
+  saveApplicationsToDisk(applications);
 
   return res.json({
     success: true,

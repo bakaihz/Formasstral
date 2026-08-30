@@ -190,3 +190,30 @@ export async function deleteApplicationOnServer(id: string): Promise<boolean> {
   }
   return false;
 }
+
+export async function getDiscordWebhookSettings(): Promise<{ hasDiscordWebhook: boolean; discordWebhookUrl: string }> {
+  try {
+    const res = await fetch('/api/settings');
+    if (res.ok) {
+      const data = await res.json();
+      return data.settings || { hasDiscordWebhook: false, discordWebhookUrl: '' };
+    }
+  } catch (err) {
+    // ignore
+  }
+  return { hasDiscordWebhook: false, discordWebhookUrl: '' };
+}
+
+export async function saveDiscordWebhookSettings(discordWebhookUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ discordWebhookUrl }),
+    });
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
